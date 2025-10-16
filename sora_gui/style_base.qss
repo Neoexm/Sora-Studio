@@ -113,3 +113,54 @@ QToolTip {{
   border-radius: 10px;
   padding: 6px 8px;
 }}
+
+QMenuBar {{
+  background: {SURFACE};
+  border-bottom: 1px solid {BORDER};
+  padding: 4px 8px;
+}}
+
+QMenuBar::item {{
+  background: transparent;
+  color: {TEXT};
+  padding: 6px 12px;
+  border-radius: 8px;
+}}
+
+QMenuBar::item:selected {{
+  background: {SURFACE_ALT};
+}}
+
+QMenuBar::item:pressed {{
+  background: {PRIMARY_MID};
+  color: #0E111A;
+}}
+
+QMenu {{
+  background: {SURFACE};
+  border: 1px solid {BORDER};
+  border-radius: 12px;
+  padding: 8px;
+}}
+
+QMenu::item {{
+  background: transparent;
+  color: {TEXT};
+  padding: 8px 24px 8px 12px;
+  border-radius: 8px;
+}}
+
+QMenu::item:selected {{
+  background: {SURFACE_ALT};
+}}
+
+QMenu::separator {{
+  height: 1px;
+  background: {BORDER};
+  margin: 6px 8px;
+}}
+
+QMenu::right-arrow {{
+  width: 12px;
+  height: 12px;
+}}

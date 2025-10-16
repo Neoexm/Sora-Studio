@@ -26,6 +26,8 @@ from sora_gui.preview import CompactPreviewRow
 from .dialogs import JsonDialog
 from .worker import Worker
 from .assets import icon
+from sora_core.models import Project, Settings
+from .config import get_settings, save_settings, get_last_state, save_last_state, get_recent_projects, add_recent_project
 
 logger = logging.getLogger(__name__)
 
@@ -39,11 +41,17 @@ class SoraApp(QMainWindow):
         self.last_file: Optional[str] = None
         self.thread: Optional[QThread] = None
         self.worker: Optional[Worker] = None
+        self.current_project: Optional[Project] = None
+        self.current_project_path: Optional[Path] = None
+        self.autosave_timer: Optional[QTimer] = None
+        self.project_modified: bool = False
         
         ensure_dirs()
         self._setup_ui()
+        self._setup_menu()
         self._connect_signals()
         self._load_initial_state()
+        self._setup_autosave()
     
     def _setup_ui(self) -> None:
         """Setup the user interface"""
@@ -57,6 +65,60 @@ class SoraApp(QMainWindow):
         self.splitter.setCollapsible(0, False)
         self.splitter.setCollapsible(1, True)
         self.setCentralWidget(self.splitter)
+    
+    def _setup_menu(self) -> None:
+        """Setup menu bar"""
+        menubar = self.menuBar()
+        
+        file_menu = menubar.addMenu("&File")
+        
+        new_action = file_menu.addAction("&New Project")
+        new_action.setShortcut("Ctrl+N")
+        new_action.triggered.connect(self.new_project)
+        
+        open_action = file_menu.addAction("&Open Project...")
+        open_action.setShortcut("Ctrl+O")
+        open_action.triggered.connect(self.open_project)
+        
+        self.recent_menu = file_menu.addMenu("Open &Recent")
+        self._update_recent_menu()
+        
+        file_menu.addSeparator()
+        
+        save_action = file_menu.addAction("&Save Project")
+        save_action.setShortcut("Ctrl+S")
+        save_action.triggered.connect(self.save_project)
+        
+        save_as_action = file_menu.addAction("Save Project &As...")
+        save_as_action.setShortcut("Ctrl+Shift+S")
+        save_as_action.triggered.connect(self.save_project_as)
+        
+        file_menu.addSeparator()
+        
+        quit_action = file_menu.addAction("&Quit")
+        quit_action.setShortcut("Ctrl+Q")
+        quit_action.triggered.connect(self.close)
+    
+    def _update_recent_menu(self) -> None:
+        """Update recent projects menu"""
+        self.recent_menu.clear()
+        recent = get_recent_projects()
+        
+        if not recent:
+            action = self.recent_menu.addAction("No recent projects")
+            action.setEnabled(False)
+            return
+        
+        for project_path in recent:
+            if Path(project_path).exists():
+                action = self.recent_menu.addAction(Path(project_path).name)
+                action.triggered.connect(lambda checked, p=project_path: self.open_project_path(p))
+    
+    def _setup_autosave(self) -> None:
+        """Setup autosave timer"""
+        self.autosave_timer = QTimer(self)
+        self.autosave_timer.timeout.connect(self._autosave)
+        self.autosave_timer.start(30000)
     
     def _create_top_panel(self) -> QWidget:
         """Create top control panel"""
@@ -266,7 +328,32 @@ class SoraApp(QMainWindow):
         """Load initial application state"""
         self.api_key_edit.setText(get_saved_key())
         self.refresh_sizes()
+        
+        last_state = get_last_state()
+        if last_state:
+            if "model" in last_state:
+                idx = self.model_box.findText(last_state["model"])
+                if idx >= 0:
+                    self.model_box.setCurrentIndex(idx)
+            if "size" in last_state:
+                idx = self.size_box.findText(last_state["size"])
+                if idx >= 0:
+                    self.size_box.setCurrentIndex(idx)
+            if "duration" in last_state:
+                idx = self.seconds_box.findText(last_state["duration"])
+                if idx >= 0:
+                    self.seconds_box.setCurrentIndex(idx)
+            if "prompt" in last_state and last_state["prompt"]:
+                self.prompt_edit.setPlainText(last_state["prompt"])
+        
         self.on_size_change(self.size_box.currentText())
+        
+        self.model_box.currentTextChanged.connect(lambda: self._mark_modified())
+        self.size_box.currentTextChanged.connect(lambda: self._mark_modified())
+        self.seconds_box.currentTextChanged.connect(lambda: self._mark_modified())
+        self.prompt_edit.textChanged.connect(lambda: self._mark_modified())
+        self.output_dir_edit.textChanged.connect(lambda: self._mark_modified())
+        
         QTimer.singleShot(500, self._layout_self_check_now)
     
     def resizeEvent(self, e) -> None:
@@ -679,3 +766,206 @@ class SoraApp(QMainWindow):
             return
         QGuiApplication.clipboard().setText(txt)
         self.log.appendPlainText(f"Copied job ID: {txt}")
+    
+    def new_project(self) -> None:
+        """Create a new project"""
+        if self.project_modified and self.current_project:
+            reply = QMessageBox.question(
+                self,
+                "Unsaved Changes",
+                "Save current project before creating a new one?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                if not self.save_project():
+                    return
+            elif reply == QMessageBox.StandardButton.Cancel:
+                return
+        
+        self.current_project = Project(
+            name="Untitled Project",
+            output_dir=str(OUTPUT_DIR),
+            settings=Settings(**get_settings())
+        )
+        self.current_project_path = None
+        self.project_modified = False
+        self._update_window_title()
+        self.log.appendPlainText("Created new project")
+    
+    def open_project(self) -> None:
+        """Open a project file"""
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Open Project",
+            str(Path.home()),
+            "Sora Studio Projects (*.sorastudio);;All Files (*)"
+        )
+        if path:
+            self.open_project_path(path)
+    
+    def open_project_path(self, path: str) -> None:
+        """Open a specific project file"""
+        try:
+            project_path = Path(path)
+            self.current_project = Project.load(project_path)
+            self.current_project_path = project_path
+            self.project_modified = False
+            self._restore_project_state()
+            add_recent_project(str(project_path))
+            self._update_recent_menu()
+            self._update_window_title()
+            self.log.appendPlainText(f"Opened project: {project_path.name}")
+        except Exception as e:
+            logger.error(f"Failed to open project: {e}")
+            QMessageBox.critical(self, "Error", f"Failed to open project:\n{e}")
+    
+    def save_project(self) -> bool:
+        """Save current project"""
+        if not self.current_project:
+            return self.save_project_as()
+        
+        if not self.current_project_path:
+            return self.save_project_as()
+        
+        try:
+            self._capture_current_state()
+            self.current_project.save(self.current_project_path)
+            self.project_modified = False
+            self._update_window_title()
+            self.log.appendPlainText(f"Saved project: {self.current_project_path.name}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to save project: {e}")
+            QMessageBox.critical(self, "Error", f"Failed to save project:\n{e}")
+            return False
+    
+    def save_project_as(self) -> bool:
+        """Save project with a new name"""
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save Project As",
+            str(Path.home() / "untitled.sorastudio"),
+            "Sora Studio Projects (*.sorastudio);;All Files (*)"
+        )
+        if not path:
+            return False
+        
+        project_path = Path(path)
+        if not project_path.suffix:
+            project_path = project_path.with_suffix(".sorastudio")
+        
+        try:
+            if not self.current_project:
+                self.current_project = Project(
+                    name=project_path.stem,
+                    output_dir=str(OUTPUT_DIR),
+                    settings=Settings(**get_settings())
+                )
+            
+            self.current_project.name = project_path.stem
+            self._capture_current_state()
+            self.current_project.save(project_path)
+            self.current_project_path = project_path
+            self.project_modified = False
+            add_recent_project(str(project_path))
+            self._update_recent_menu()
+            self._update_window_title()
+            self.log.appendPlainText(f"Saved project: {project_path.name}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to save project: {e}")
+            QMessageBox.critical(self, "Error", f"Failed to save project:\n{e}")
+            return False
+    
+    def _autosave(self) -> None:
+        """Autosave current project"""
+        if self.project_modified and self.current_project and self.current_project_path:
+            try:
+                self._capture_current_state()
+                self.current_project.save(self.current_project_path)
+                logger.info(f"Autosaved project: {self.current_project_path.name}")
+            except Exception as e:
+                logger.error(f"Autosave failed: {e}")
+    
+    def _capture_current_state(self) -> None:
+        """Capture current UI state to project"""
+        if not self.current_project:
+            return
+        
+        self.current_project.current_model = self.model_box.currentText()
+        self.current_project.current_size = self.size_box.currentText()
+        self.current_project.current_duration = int(self.seconds_box.currentText())
+        self.current_project.current_prompt = self.prompt_edit.toPlainText()
+        self.current_project.output_dir = self.output_dir_edit.text()
+    
+    def _restore_project_state(self) -> None:
+        """Restore UI state from project"""
+        if not self.current_project:
+            return
+        
+        if self.current_project.current_model:
+            idx = self.model_box.findText(self.current_project.current_model)
+            if idx >= 0:
+                self.model_box.setCurrentIndex(idx)
+        
+        if self.current_project.current_size:
+            idx = self.size_box.findText(self.current_project.current_size)
+            if idx >= 0:
+                self.size_box.setCurrentIndex(idx)
+        
+        if self.current_project.current_duration:
+            idx = self.seconds_box.findText(str(self.current_project.current_duration))
+            if idx >= 0:
+                self.seconds_box.setCurrentIndex(idx)
+        
+        if self.current_project.current_prompt:
+            self.prompt_edit.setPlainText(self.current_project.current_prompt)
+        
+        if self.current_project.output_dir:
+            self.output_dir_edit.setText(self.current_project.output_dir)
+    
+    def _update_window_title(self) -> None:
+        """Update window title with project name"""
+        title = "Sora Studio"
+        if self.current_project:
+            title = f"{self.current_project.name} - Sora Studio"
+            if self.project_modified:
+                title = f"*{title}"
+        self.setWindowTitle(title)
+    
+    def _mark_modified(self) -> None:
+        """Mark project as modified"""
+        self.project_modified = True
+        self._update_window_title()
+    
+    def closeEvent(self, event) -> None:
+        """Handle window close"""
+        if self.project_modified and self.current_project:
+            reply = QMessageBox.question(
+                self,
+                "Unsaved Changes",
+                "Save project before closing?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                if not self.save_project():
+                    event.ignore()
+                    return
+            elif reply == QMessageBox.StandardButton.Cancel:
+                event.ignore()
+                return
+        
+        save_last_state({
+            "model": self.model_box.currentText(),
+            "size": self.size_box.currentText(),
+            "duration": self.seconds_box.currentText(),
+            "prompt": self.prompt_edit.toPlainText()
+        })
+        
+        if self.thread and self.thread.isRunning():
+            if self.worker:
+                self.worker.cancel()
+            self.thread.quit()
+            self.thread.wait(2000)
+        
+        event.accept()

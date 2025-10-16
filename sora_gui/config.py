@@ -96,3 +96,40 @@ def set_saved_key(key: str) -> None:
     cfg = load_config()
     cfg["api_key"] = encoded
     save_config(cfg)
+
+def get_settings() -> Dict[str, Any]:
+    """Get settings from config"""
+    cfg = load_config()
+    return cfg.get("settings", {})
+
+def save_settings(settings: Dict[str, Any]) -> None:
+    """Save settings to config"""
+    cfg = load_config()
+    cfg["settings"] = settings
+    save_config(cfg)
+
+def get_recent_projects() -> list[str]:
+    """Get list of recent project paths"""
+    cfg = load_config()
+    return cfg.get("recent_projects", [])
+
+def add_recent_project(path: str) -> None:
+    """Add project to recent list"""
+    cfg = load_config()
+    recent = cfg.get("recent_projects", [])
+    if path in recent:
+        recent.remove(path)
+    recent.insert(0, path)
+    cfg["recent_projects"] = recent[:10]
+    save_config(cfg)
+
+def get_last_state() -> Dict[str, Any]:
+    """Get last application state"""
+    cfg = load_config()
+    return cfg.get("last_state", {})
+
+def save_last_state(state: Dict[str, Any]) -> None:
+    """Save last application state"""
+    cfg = load_config()
+    cfg["last_state"] = state
+    save_config(cfg)
