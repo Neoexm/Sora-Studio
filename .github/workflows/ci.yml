@@ -41,7 +41,7 @@ jobs:
               pyinstaller main.py --name SoraStudio --onefile --windowed --clean --collect-all PySide6 --collect-all keyring --collect-all platformdirs --collect-all sora_gui
             package_cmd: |
               sudo apt-get update
-              sudo apt-get install -y libfuse2
+              sudo apt-get install -y libfuse2 imagemagick
               wget -c https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage
               chmod +x appimagetool-x86_64.AppImage
               mkdir -p AppDir/usr/bin
