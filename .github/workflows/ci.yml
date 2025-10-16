@@ -12,7 +12,9 @@ permissions:
 jobs:
   build:
     runs-on: ${{ matrix.os }}
+    continue-on-error: false
     strategy:
+      fail-fast: false
       matrix:
         include:
           - os: windows-latest
@@ -38,19 +40,24 @@ jobs:
             build_cmd: |
               pyinstaller main.py --name SoraStudio --onefile --windowed --clean --collect-all PySide6 --collect-all keyring --collect-all platformdirs --collect-all sora_gui
             package_cmd: |
-              wget -c https://github.com/$(wget -q https://github.com/probonopd/go-appimage/releases -O - | grep "appimagetool-.*-x86_64.AppImage" | head -n 1 | cut -d '"' -f 2)
-              chmod +x appimagetool-*.AppImage
+              sudo apt-get update
+              sudo apt-get install -y libfuse2
+              wget -c https://github.com/probonopd/go-appimage/releases/download/continuous/appimagetool-x86_64.AppImage
+              chmod +x appimagetool-x86_64.AppImage
               mkdir -p AppDir/usr/bin
               cp dist/SoraStudio AppDir/usr/bin/
-              cat > AppDir/SoraStudio.desktop << EOF
+              mkdir -p AppDir/usr/share/applications
+              cat > AppDir/usr/share/applications/SoraStudio.desktop << 'EOF'
               [Desktop Entry]
               Name=Sora Studio
               Exec=SoraStudio
               Icon=SoraStudio
               Type=Application
-              Categories=Graphics;
+              Categories=Graphics;Video;
               EOF
-              ./appimagetool-*.AppImage AppDir dist/SoraStudio.AppImage
+              mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
+              touch AppDir/usr/share/icons/hicolor/256x256/apps/SoraStudio.png
+              ARCH=x86_64 ./appimagetool-x86_64.AppImage AppDir dist/SoraStudio.AppImage
 
     steps:
       - uses: actions/checkout@v4
