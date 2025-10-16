@@ -4,6 +4,7 @@ from PySide6.QtCore import Qt, QSize
 from PySide6.QtGui import QPainter, QColor, QPen, QFont
 
 from .utils import aspect_of
+from .constants import PREVIEW_MAX_SIZE
 
 class AspectPreview(QFrame):
     def __init__(self):
@@ -19,7 +20,7 @@ class AspectPreview(QFrame):
 
     def _resize_to_aspect(self):
         w, h = aspect_of(self.size_str)
-        max_side = 360
+        max_side = PREVIEW_MAX_SIZE
         if w >= h:
             fw = max_side
             fh = int(max_side * h / w)

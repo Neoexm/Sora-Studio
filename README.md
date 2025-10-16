@@ -43,7 +43,7 @@ pip install -r requirements.txt
 python main.py
 ````
 
-On first run, paste your API key and click **Save Key**. Keys are stored in Windows Credential Manager, with a config-file fallback at `%USERPROFILE%\.sora2gui`.
+On first run, paste your API key and click **Save Key**. Keys are stored in Windows Credential Manager, with a config-file fallback at `%USERPROFILE%\.sorastudio`.
 
 ## Build a Windows EXE
 
@@ -64,5 +64,5 @@ The executable will be at `dist\SoraStudio.exe`.
 
 ## Troubleshooting
 
-* `moderation_blocked`: rewrite the prompt to avoid openai's overly strict content policys
+* `moderation_blocked`: rewrite the prompt to avoid OpenAI's content policies
 * Poll `500` or stuck at `99%`: the app auto-retries and attempts a download even if status is `failed`. Use **Resume Job** with the same ID if needed. Include request IDs from **Show Last Response** when filing issues.
