@@ -1,48 +1,93 @@
-
-# `.github/workflows/ci.yml`
-```yaml
 name: CI
 
-on:
-  push:
-    branches: [ main ]
-  pull_request:
+# `.github/workflows/ci.yml`
+
+on:```yaml
+
+  push:name: CI
+
     branches: [ main ]
 
-permissions:
-  contents: read
+  pull_request:on:
 
-jobs:
-  build-windows:
+    branches: [ main ]  push:
+
+    branches: [ main ]
+
+permissions:  pull_request:
+
+  contents: read    branches: [ main ]
+
+
+
+jobs:permissions:
+
+  build-windows:  contents: read
+
     runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
-        with:
+    steps:jobs:
+
+      - uses: actions/checkout@v4  build-windows:
+
+    runs-on: windows-latest
+
+      - uses: actions/setup-python@v5    steps:
+
+        with:      - uses: actions/checkout@v4
+
           python-version: '3.11'
 
-      - name: Install dependencies
-        run: |
+      - uses: actions/setup-python@v5
+
+      - name: Install dependencies        with:
+
+        run: |          python-version: '3.11'
+
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install pyinstaller
 
-      - name: Build EXE
-        run: |
+          pip install -r requirements.txt      - name: Install dependencies
+
+          pip install pyinstaller        run: |
+
+          python -m pip install --upgrade pip
+
+      - name: Build EXE          pip install -r requirements.txt
+
+        run: |          pip install pyinstaller
+
           pyinstaller main.py `
-            --name SoraStudio `
-            --onefile `
-            --windowed `
-            --clean `
-            --collect-all PySide6 `
-            --collect-all keyring `
-            --collect-all platformdirs `
-            --collect-all sora_gui `
-            --icon .\icon.ico
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+            --name SoraStudio `      - name: Build EXE
+
+            --onefile `        run: |
+
+            --windowed `          pyinstaller main.py `
+
+            --clean `            --name SoraStudio `
+
+            --collect-all PySide6 `            --onefile `
+
+            --collect-all keyring `            --windowed `
+
+            --collect-all platformdirs `            --clean `
+
+            --collect-all sora_gui `            --collect-all PySide6 `
+
+            --icon .\icon.ico            --collect-all keyring `
+
+            --collect-all platformdirs `
+
+      - name: Upload artifact            --collect-all sora_gui `
+
+        uses: actions/upload-artifact@v4            --icon .\icon.ico
+
+        with:
+
+          name: SoraStudio-windows-x64      - name: Upload artifact
+
+          path: dist/SoraStudio.exe        uses: actions/upload-artifact@v4
+
         with:
           name: SoraStudio-windows-x64
           path: dist/SoraStudio.exe
