@@ -1,57 +1,88 @@
 """Custom widgets"""
-from PySide6.QtWidgets import QFrame, QLabel
-from PySide6.QtCore import Qt, QSize
+from PySide6.QtWidgets import QFrame, QSizePolicy
+from PySide6.QtCore import QSize
 from PySide6.QtGui import QPainter, QColor, QPen, QFont
 
-from .utils import aspect_of
-from .constants import PREVIEW_MAX_SIZE
+from .theme import THEME
 
 class AspectPreview(QFrame):
     def __init__(self):
         super().__init__()
         self.size_str = "1280x720"
-        self.setStyleSheet("QFrame { background: #111; border: 1px solid #333; }")
-        self.label = QLabel(self)
-        self.label.setAlignment(Qt.AlignCenter)
-        self.label.setStyleSheet("color: #ddd;")
-        self.label.setText(self.size_str)
-        self.label.setFont(QFont("Arial", 12, QFont.Bold))
-        self._resize_to_aspect()
+        self._aspect = (16, 9)
+        self.setObjectName("AspectPreview")
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.setMinimumHeight(220)
+        self._caption_font = QFont("Segoe UI", 10, QFont.Weight.DemiBold)
+        self._text_font = QFont("Segoe UI", 12, QFont.Weight.Bold)
 
-    def _resize_to_aspect(self):
-        w, h = aspect_of(self.size_str)
-        max_side = PREVIEW_MAX_SIZE
-        if w >= h:
-            fw = max_side
-            fh = int(max_side * h / w)
-        else:
-            fh = max_side
-            fw = int(max_side * w / h)
-        self.setFixedSize(QSize(fw + 24, fh + 24))
-        self.update()
+    def hasHeightForWidth(self):
+        return True
+
+    def heightForWidth(self, w):
+        aw, ah = self._aspect
+        if aw <= 0 or ah <= 0:
+            return self.minimumHeight()
+        h = int(w * ah / aw)
+        return max(h, self.minimumHeight())
+
+    def sizeHint(self):
+        w = 720
+        return QSize(w, self.heightForWidth(w))
 
     def set_size_str(self, s):
         self.size_str = s
-        self.label.setText(s)
-        self._resize_to_aspect()
-
-    def resizeEvent(self, e):
-        super().resizeEvent(e)
-        self.label.setGeometry(self.rect())
+        parts = s.split("x")
+        if len(parts) == 2:
+            aw, ah = int(parts[0]), int(parts[1])
+            gcd_val = self._gcd(aw, ah)
+            self._aspect = (aw // gcd_val, ah // gcd_val)
+        else:
+            self._aspect = (16, 9)
+        self.updateGeometry()
+        self.update()
+    
+    def _gcd(self, a, b):
+        while b:
+            a, b = b, a % b
+        return a
 
     def paintEvent(self, e):
         super().paintEvent(e)
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing)
-        w, h = aspect_of(self.size_str)
-        box_w = self.width() - 24
-        box_h = self.height() - 24
-        r = min(box_w / w, box_h / h)
-        rw = int(w * r)
-        rh = int(h * r)
-        x = (self.width() - rw) // 2
-        y = (self.height() - rh) // 2
-        pen = QPen(QColor("#66aaff"))
+        r = self.contentsRect().adjusted(12, 12, -12, -12)
+        if r.width() <= 2 or r.height() <= 2:
+            return
+        
+        parts = self.size_str.split("x")
+        if len(parts) != 2:
+            return
+        aw, ah = int(parts[0]), int(parts[1])
+        
+        scale = min(r.width() / aw, r.height() / ah)
+        rw = int(aw * scale)
+        rh = int(ah * scale)
+        x = r.x() + (r.width() - rw) // 2
+        y = r.y() + (r.height() - rh) // 2
+
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        
+        pen = QPen(QColor(THEME.primary_mid))
         pen.setWidth(3)
-        painter.setPen(pen)
-        painter.drawRect(x, y, rw, rh)
+        p.setPen(pen)
+        p.drawRect(x, y, rw, rh)
+
+        p.setFont(self._text_font)
+        p.setPen(QColor(THEME.text))
+        text1 = self.size_str
+        text1_width = p.fontMetrics().horizontalAdvance(text1)
+        p.drawText(x + (rw - text1_width) // 2, y + rh // 2 - 10, text1)
+        
+        gcd_val = self._gcd(aw, ah)
+        ar = f"{aw // gcd_val}:{ah // gcd_val}" if aw and ah else ""
+        text2 = f"{aw}×{ah} • {ar}"
+        
+        p.setFont(self._caption_font)
+        p.setPen(QColor(THEME.text_muted))
+        text2_width = p.fontMetrics().horizontalAdvance(text2)
+        p.drawText(x + (rw - text2_width) // 2, y + rh // 2 + 15, text2)

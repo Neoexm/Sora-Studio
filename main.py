@@ -4,8 +4,11 @@ import sys
 import logging
 from pathlib import Path
 from PySide6.QtWidgets import QApplication
+from PySide6.QtGui import QFont, QGuiApplication
+from PySide6.QtCore import Qt
 from sora_gui.main_window import SoraApp
 from sora_gui.config import CONFIG_DIR
+from sora_gui.style import apply as apply_style
 
 def setup_logging():
     """Setup application logging"""
@@ -29,7 +32,13 @@ def setup_logging():
 def main():
     """Main application entry point"""
     setup_logging()
+    
+    QGuiApplication.setHighDpiScaleFactorRoundingPolicy(Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
+    
     app = QApplication(sys.argv)
+    app.setFont(QFont("Segoe UI", 10))
+    apply_style(app)
+    
     w = SoraApp()
     w.show()
     sys.exit(app.exec())

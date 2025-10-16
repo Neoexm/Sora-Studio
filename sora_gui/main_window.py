@@ -6,12 +6,13 @@ from typing import Optional, Tuple
 
 import requests
 from PySide6.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QFormLayout, QHBoxLayout,
+    QMainWindow, QWidget, QVBoxLayout, QFormLayout, QHBoxLayout, QGridLayout,
     QComboBox, QLineEdit, QTextEdit, QPushButton, QLabel, QFileDialog,
-    QProgressBar, QPlainTextEdit, QMessageBox, QSplitter, QCheckBox, QSpinBox
+    QProgressBar, QPlainTextEdit, QMessageBox, QSplitter, QCheckBox, QSpinBox, QFrame, QSizePolicy, QScrollArea
 )
-from PySide6.QtCore import Qt, QSize, QThread, QUrl
+from PySide6.QtCore import Qt, QSize, QThread, QUrl, QTimer, QPoint, QRect
 from PySide6.QtGui import QDesktopServices, QGuiApplication
+from shiboken6 import isValid
 
 try:
     from PIL import Image
@@ -21,15 +22,17 @@ except ImportError:
 from .constants import API_BASE, SUPPORTED_SIZES, SUPPORTED_SECONDS, TIMEOUT_TEST, TIMEOUT_MODERATION
 from .config import OUTPUT_DIR, get_saved_key, set_saved_key, ensure_dirs
 from .utils import safe_json, pretty, aspect_of, check_disk_space, validate_api_key
-from .widgets import AspectPreview
+from sora_gui.preview import CompactPreviewRow
 from .dialogs import JsonDialog
 from .worker import Worker
+from .assets import icon
 
 logger = logging.getLogger(__name__)
 
 class SoraApp(QMainWindow):
     def __init__(self):
         super().__init__()
+        self.setObjectName("Root")
         self.setWindowTitle("Sora Studio")
         self.setMinimumSize(QSize(1040, 820))
         self.last_response: Optional[dict] = None
@@ -41,183 +44,114 @@ class SoraApp(QMainWindow):
         self._setup_ui()
         self._connect_signals()
         self._load_initial_state()
-        top = QWidget()
-        top_layout = QVBoxLayout(top)
-        form = QFormLayout()
-        self.model_box = QComboBox()
-        self.model_box.addItems(["sora-2", "sora-2-pro"])
-        self.size_box = QComboBox()
-        self.seconds_box = QComboBox()
-        self.seconds_box.addItems(SUPPORTED_SECONDS)
-        self.api_key_edit = QLineEdit()
-        self.api_key_edit.setEchoMode(QLineEdit.Password)
-        self.api_key_edit.setPlaceholderText("sk-...")
-        self.save_key_btn = QPushButton("Save Key")
-        self.test_key_btn = QPushButton("Test Key")
-        key_row = QHBoxLayout()
-        key_row.addWidget(self.api_key_edit, 1)
-        key_row.addWidget(self.save_key_btn)
-        key_row.addWidget(self.test_key_btn)
-        self.preview = AspectPreview()
-        self.prompt_edit = QTextEdit()
-        self.prompt_edit.setPlaceholderText("Insert your prompt here...")
-        self.input_edit = QLineEdit()
-        self.input_browse = QPushButton("Browse…")
-        input_row = QHBoxLayout()
-        input_row.addWidget(self.input_edit, 1)
-        input_row.addWidget(self.input_browse)
-        self.output_dir_edit = QLineEdit(str(OUTPUT_DIR))
-        self.output_dir_btn = QPushButton("Change…")
-        out_row = QHBoxLayout()
-        out_row.addWidget(self.output_dir_edit, 1)
-        out_row.addWidget(self.output_dir_btn)
-        self.preflight_box = QCheckBox("Preflight moderation")
-        self.preflight_box.setChecked(True)
-        self.poll_spin = QSpinBox()
-        self.poll_spin.setRange(1, 20)
-        self.poll_spin.setValue(2)
-        self.maxwait_spin = QSpinBox()
-        self.maxwait_spin.setRange(1, 60)
-        self.maxwait_spin.setValue(12)
-        self.jobid_edit = QLineEdit()
-        self.jobid_edit.setPlaceholderText("existing job id (optional)")
-        self.resume_btn = QPushButton("Resume Job")
-        self.copy_job_btn = QPushButton("Copy Job ID")
-        poll_row = QHBoxLayout()
-        poll_row.addWidget(QLabel("Poll every (s)"))
-        poll_row.addWidget(self.poll_spin)
-        poll_row.addWidget(QLabel("Max wait (min)"))
-        poll_row.addWidget(self.maxwait_spin)
-        poll_row.addStretch(1)
-        jid_row = QHBoxLayout()
-        jid_row.addWidget(self.jobid_edit, 1)
-        jid_row.addWidget(self.resume_btn)
-        jid_row.addWidget(self.copy_job_btn)
-        self.send_btn = QPushButton("Generate")
-        self.open_last_btn = QPushButton("Open Last File")
-        self.open_last_btn.setEnabled(False)
-        self.show_resp_btn = QPushButton("Show Last Response")
-        self.show_resp_btn.setEnabled(False)
-        btn_row = QHBoxLayout()
-        btn_row.addWidget(self.send_btn)
-        btn_row.addWidget(self.open_last_btn)
-        btn_row.addWidget(self.show_resp_btn)
-        self.progress = QProgressBar()
-        self.progress.setRange(0, 100)
-        self.log = QPlainTextEdit()
-        self.log.setReadOnly(True)
-        form.addRow("Model", self.model_box)
-        form.addRow("Size", self.size_box)
-        form.addRow("Duration (s)", self.seconds_box)
-        form.addRow("API Key", key_row)
-        form.addRow("Aspect Preview", self.preview)
-        form.addRow("Prompt", self.prompt_edit)
-        form.addRow("Input Reference (optional)", input_row)
-        form.addRow("Output Folder", out_row)
-        form.addRow("Safety", self.preflight_box)
-        form.addRow("Polling", poll_row)
-        form.addRow("Job Control", jid_row)
-        top_layout.addLayout(form)
-        top_layout.addLayout(btn_row)
-        bottom = QWidget()
-        bottom_layout = QVBoxLayout(bottom)
-        bottom_layout.addWidget(self.progress)
-        bottom_layout.addWidget(self.log, 1)
-        splitter = QSplitter(Qt.Vertical)
-        splitter.addWidget(top)
-        splitter.addWidget(bottom)
-        splitter.setStretchFactor(0, 0)
-        splitter.setStretchFactor(1, 1)
-        cw = QWidget()
-        cw_layout = QVBoxLayout(cw)
-        cw_layout.addWidget(splitter)
-        self.setCentralWidget(cw)
-        self.model_box.currentTextChanged.connect(self.refresh_sizes)
-        self.size_box.currentTextChanged.connect(self.on_size_change)
-        self.input_browse.clicked.connect(self.browse_input)
-        self.output_dir_btn.clicked.connect(self.browse_output)
-        self.save_key_btn.clicked.connect(self.save_key)
-        self.test_key_btn.clicked.connect(self.test_key)
-        self.send_btn.clicked.connect(self.generate)
-        self.show_resp_btn.clicked.connect(self.show_last_response)
-        self.open_last_btn.clicked.connect(self.open_last_file)
-        self.resume_btn.clicked.connect(self.resume_job)
-        self.copy_job_btn.clicked.connect(self.copy_job_id)
+    
     def _setup_ui(self) -> None:
         """Setup the user interface"""
-        top = self._create_top_panel()
-        bottom = self._create_bottom_panel()
-        
-        splitter = QSplitter(Qt.Vertical)
-        splitter.addWidget(top)
-        splitter.addWidget(bottom)
-        splitter.setStretchFactor(0, 0)
-        splitter.setStretchFactor(1, 1)
-        
-        cw = QWidget()
-        cw_layout = QVBoxLayout(cw)
-        cw_layout.addWidget(splitter)
-        self.setCentralWidget(cw)
+        self.splitter = QSplitter(Qt.Orientation.Vertical)
+        self.top_panel = self._create_top_panel()
+        self.bottom_panel = self._create_bottom_panel()
+        self.splitter.addWidget(self.top_panel)
+        self.splitter.addWidget(self.bottom_panel)
+        self.splitter.setStretchFactor(0, 3)
+        self.splitter.setStretchFactor(1, 1)
+        self.splitter.setCollapsible(0, False)
+        self.splitter.setCollapsible(1, True)
+        self.setCentralWidget(self.splitter)
     
     def _create_top_panel(self) -> QWidget:
         """Create top control panel"""
-        top = QWidget()
-        top_layout = QVBoxLayout(top)
-        form = self._create_form()
-        btn_row = self._create_button_row()
-        top_layout.addLayout(form)
-        top_layout.addLayout(btn_row)
-        return top
-    
-    def _create_form(self) -> QFormLayout:
-        """Create main form layout"""
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+        
+        self.scroll_inner = QWidget()
+        self.scroll_area.setWidget(self.scroll_inner)
+        
+        root = QVBoxLayout(self.scroll_inner)
+        root.setContentsMargins(20, 20, 20, 20)
+        root.setSpacing(14)
+        
         form = QFormLayout()
+        form.setLabelAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+        form.setVerticalSpacing(10)
+        form.setHorizontalSpacing(12)
         
         self.model_box = QComboBox()
         self.model_box.addItems(["sora-2", "sora-2-pro"])
+        form.addRow("Model", self.model_box)
         
         self.size_box = QComboBox()
+        form.addRow("Size", self.size_box)
+        
         self.seconds_box = QComboBox()
         self.seconds_box.addItems(SUPPORTED_SECONDS)
+        form.addRow("Duration (s)", self.seconds_box)
         
         key_row = self._create_api_key_row()
-        self.preview = AspectPreview()
+        form.addRow("API Key", key_row)
+        
+        root.addLayout(form)
+        
+        self.preview_row = CompactPreviewRow(self.scroll_inner)
+        self.preview_row.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.preview_row.setMaximumHeight(200)
+        root.addWidget(self.preview_row)
+        
+        root.addSpacing(12)
+        
+        prompt_label = QLabel("Prompt")
+        prompt_label.setProperty("heading", True)
+        root.addWidget(prompt_label)
         
         self.prompt_edit = QTextEdit()
         self.prompt_edit.setPlaceholderText("Insert your prompt here...")
+        self.prompt_edit.setMinimumHeight(140)
+        self.prompt_edit.setMaximumHeight(220)
+        self.prompt_edit.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        root.addWidget(self.prompt_edit)
+        
+        form2 = QFormLayout()
+        form2.setLabelAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        form2.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+        form2.setVerticalSpacing(10)
+        form2.setHorizontalSpacing(12)
         
         input_row = self._create_input_row()
+        form2.addRow("Input Reference (optional)", input_row)
+        
         out_row = self._create_output_row()
+        form2.addRow("Output Folder", out_row)
         
         self.preflight_box = QCheckBox("Preflight moderation")
         self.preflight_box.setChecked(True)
+        form2.addRow("Safety", self.preflight_box)
         
         poll_row = self._create_poll_row()
+        form2.addRow("Polling", poll_row)
+        
         jid_row = self._create_job_control_row()
+        form2.addRow("Job Control", jid_row)
         
-        form.addRow("Model", self.model_box)
-        form.addRow("Size", self.size_box)
-        form.addRow("Duration (s)", self.seconds_box)
-        form.addRow("API Key", key_row)
-        form.addRow("Aspect Preview", self.preview)
-        form.addRow("Prompt", self.prompt_edit)
-        form.addRow("Input Reference (optional)", input_row)
-        form.addRow("Output Folder", out_row)
-        form.addRow("Safety", self.preflight_box)
-        form.addRow("Polling", poll_row)
-        form.addRow("Job Control", jid_row)
+        root.addLayout(form2)
         
-        return form
+        btn_row = self._create_button_row()
+        root.addLayout(btn_row)
+        
+        return self.scroll_area
     
+
+
     def _create_api_key_row(self) -> QHBoxLayout:
         """Create API key input row"""
         self.api_key_edit = QLineEdit()
         self.api_key_edit.setEchoMode(QLineEdit.Password)
         self.api_key_edit.setPlaceholderText("sk-...")
-        self.save_key_btn = QPushButton("Save Key")
+        self.save_key_btn = QPushButton(icon("key.svg"), "Save Key")
         self.test_key_btn = QPushButton("Test Key")
         
         key_row = QHBoxLayout()
+        key_row.setSpacing(8)
         key_row.addWidget(self.api_key_edit, 1)
         key_row.addWidget(self.save_key_btn)
         key_row.addWidget(self.test_key_btn)
@@ -226,9 +160,10 @@ class SoraApp(QMainWindow):
     def _create_input_row(self) -> QHBoxLayout:
         """Create input file row"""
         self.input_edit = QLineEdit()
-        self.input_browse = QPushButton("Browse…")
+        self.input_browse = QPushButton(icon("image.svg"), "Browse…")
         
         input_row = QHBoxLayout()
+        input_row.setSpacing(8)
         input_row.addWidget(self.input_edit, 1)
         input_row.addWidget(self.input_browse)
         return input_row
@@ -236,9 +171,10 @@ class SoraApp(QMainWindow):
     def _create_output_row(self) -> QHBoxLayout:
         """Create output directory row"""
         self.output_dir_edit = QLineEdit(str(OUTPUT_DIR))
-        self.output_dir_btn = QPushButton("Change…")
+        self.output_dir_btn = QPushButton(icon("folder.svg"), "Change…")
         
         out_row = QHBoxLayout()
+        out_row.setSpacing(8)
         out_row.addWidget(self.output_dir_edit, 1)
         out_row.addWidget(self.output_dir_btn)
         return out_row
@@ -265,10 +201,11 @@ class SoraApp(QMainWindow):
         """Create job control row"""
         self.jobid_edit = QLineEdit()
         self.jobid_edit.setPlaceholderText("existing job id (optional)")
-        self.resume_btn = QPushButton("Resume Job")
+        self.resume_btn = QPushButton(icon("job.svg"), "Resume Job")
         self.copy_job_btn = QPushButton("Copy Job ID")
         
         jid_row = QHBoxLayout()
+        jid_row.setSpacing(8)
         jid_row.addWidget(self.jobid_edit, 1)
         jid_row.addWidget(self.resume_btn)
         jid_row.addWidget(self.copy_job_btn)
@@ -276,13 +213,16 @@ class SoraApp(QMainWindow):
     
     def _create_button_row(self) -> QHBoxLayout:
         """Create main action button row"""
-        self.send_btn = QPushButton("Generate")
-        self.open_last_btn = QPushButton("Open Last File")
+        self.send_btn = QPushButton(icon("play.svg"), "Generate")
+        self.send_btn.setProperty("variant", "primary")
+        self.open_last_btn = QPushButton(icon("open.svg"), "Open Last File")
         self.open_last_btn.setEnabled(False)
-        self.show_resp_btn = QPushButton("Show Last Response")
+        self.show_resp_btn = QPushButton(icon("settings.svg"), "Show Last Response")
         self.show_resp_btn.setEnabled(False)
+        self.show_resp_btn.setProperty("variant", "ghost")
         
         btn_row = QHBoxLayout()
+        btn_row.setSpacing(8)
         btn_row.addWidget(self.send_btn)
         btn_row.addWidget(self.open_last_btn)
         btn_row.addWidget(self.show_resp_btn)
@@ -292,12 +232,17 @@ class SoraApp(QMainWindow):
         """Create bottom log panel"""
         self.progress = QProgressBar()
         self.progress.setRange(0, 100)
+        self.progress.setMinimumHeight(32)
         
         self.log = QPlainTextEdit()
         self.log.setReadOnly(True)
+        self.log.setMinimumHeight(10)
         
-        bottom = QWidget()
+        bottom = QFrame()
+        bottom.setProperty("card", True)
         bottom_layout = QVBoxLayout(bottom)
+        bottom_layout.setContentsMargins(20, 20, 20, 20)
+        bottom_layout.setSpacing(12)
         bottom_layout.addWidget(self.progress)
         bottom_layout.addWidget(self.log, 1)
         return bottom
@@ -306,6 +251,7 @@ class SoraApp(QMainWindow):
         """Connect all signal handlers"""
         self.model_box.currentTextChanged.connect(self.refresh_sizes)
         self.size_box.currentTextChanged.connect(self.on_size_change)
+        self.size_box.currentTextChanged.connect(lambda: QTimer.singleShot(50, self._layout_self_check_now))
         self.input_browse.clicked.connect(self.browse_input)
         self.output_dir_btn.clicked.connect(self.browse_output)
         self.save_key_btn.clicked.connect(self.save_key)
@@ -321,6 +267,88 @@ class SoraApp(QMainWindow):
         self.api_key_edit.setText(get_saved_key())
         self.refresh_sizes()
         self.on_size_change(self.size_box.currentText())
+        QTimer.singleShot(500, self._layout_self_check_now)
+    
+    def resizeEvent(self, e) -> None:
+        """Handle window resize"""
+        super().resizeEvent(e)
+        QTimer.singleShot(50, self._layout_self_check_now)
+    
+    def _global_rect(self, w):
+        """Get widget rect relative to main window"""
+        if not w or not isValid(w):
+            return QRect()
+        try:
+            if not w.isVisible():
+                return QRect()
+            geom = w.geometry()
+            parent = w.parent()
+            while parent and parent != self and isValid(parent):
+                parent_geom = parent.geometry()
+                geom.translate(parent_geom.x(), parent_geom.y())
+                parent = parent.parent()
+            return geom
+        except:
+            return QRect()
+    
+    def _layout_self_check_now(self):
+        """Validate layout and show error banner if issues detected"""
+        if not hasattr(self, 'preview_row') or not hasattr(self, 'prompt_edit'):
+            return
+        
+        if not self.isVisible():
+            return
+        
+        if not isValid(self.preview_row) or not isValid(self.preview_row.card) or not isValid(self.prompt_edit):
+            return
+        
+        try:
+            card = self._global_rect(self.preview_row.card)
+            pr = self._global_rect(self.preview_row.canvas)
+            prompt = self._global_rect(self.prompt_edit)
+            
+            if card.isEmpty() or pr.isEmpty() or prompt.isEmpty():
+                return
+            
+            overlap = card.bottom() + 8 > prompt.top()
+            too_small = card.height() > 220
+            
+            if overlap or too_small:
+                if not hasattr(self, "_error_banner"):
+                    self._error_banner = QLabel(f"Layout error: preview overlapping or too large (card_bottom={card.bottom()}, prompt_top={prompt.top()}, card_h={card.height()})")
+                    self._error_banner.setStyleSheet("background:#EF4444;color:white;padding:6px 10px;border-radius:8px;font-weight:600;")
+                    self.statusBar().addPermanentWidget(self._error_banner)
+                    self._error_banner.show()
+                
+                ss = self.grab()
+                from pathlib import Path
+                out = Path.cwd() / "layout_failure.png"
+                ss.save(str(out))
+                logger.error(f"Layout validation failed: overlap={overlap}, too_large={too_small}, card_bottom={card.bottom()}, prompt_top={prompt.top()}, card_h={card.height()}, saved to {out}")
+            else:
+                if hasattr(self, "_error_banner"):
+                    self.statusBar().removeWidget(self._error_banner)
+                    self._error_banner.deleteLater()
+                    del self._error_banner
+                logger.info(f"Layout validation passed: card_bottom={card.bottom()}, prompt_top={prompt.top()}, gap={prompt.top() - card.bottom()}, card_h={card.height()}")
+        except Exception as e:
+            import traceback
+            logger.error(f"Layout self-check exception: {e}\n{traceback.format_exc()}")
+
+    def on_size_change(self, size_str: str) -> None:
+        """Handle size combo box change"""
+        if size_str:
+            w, h = self._parse_size(size_str)
+            self.preview_row.set_dimensions(w, h)
+    
+    def _parse_size(self, text: str) -> tuple:
+        """Parse size string like '1280x720' into (w, h)"""
+        try:
+            parts = text.lower().split("x")
+            w, h = int(parts[0]), int(parts[1])
+            return w, h
+        except:
+            return 1280, 720
 
     def refresh_sizes(self) -> None:
         """Refresh available sizes based on selected model"""
@@ -334,11 +362,6 @@ class SoraApp(QMainWindow):
         if cur in sizes:
             self.size_box.setCurrentText(cur)
         self.on_size_change(self.size_box.currentText())
-
-    def on_size_change(self, s: str) -> None:
-        """Handle size selection change"""
-        if s:
-            self.preview.set_size_str(s)
 
     def browse_input(self) -> None:
         """Browse for input reference image"""

@@ -1,0 +1,115 @@
+* {{color: {TEXT}; background: transparent;}}
+
+QMainWindow, QWidget#Root {{
+  background: {BG};
+}}
+
+QFrame[card="true"] {{
+  background: {SURFACE};
+  border: 1px solid {BORDER};
+  border-radius: 14px;
+}}
+
+QFrame#AspectPreview {{
+  background: {SURFACE};
+  border: 1px solid {BORDER};
+  border-radius: 12px;
+  padding: 8px;
+}}
+
+QFrame[card="true"] > QLabel[heading="true"] {{
+  color: {TEXT};
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}}
+
+QGroupBox {{
+  background: {SURFACE};
+  border: 1px solid {BORDER};
+  border-radius: 12px;
+  margin-top: 16px;
+  padding-top: 10px;
+}}
+
+QLabel[muted="true"] {{color: {TEXT_MUTED};}}
+QLabel[heading="true"] {{font-size: 18px; font-weight: 600;}}
+
+QLineEdit, QTextEdit, QPlainTextEdit, QComboBox, QSpinBox {{
+  background: {SURFACE_ALT};
+  border: 1px solid {BORDER};
+  border-radius: 10px;
+  padding: 8px 10px;
+  selection-background-color: {PRIMARY_MID};
+}}
+
+QComboBox::drop-down {{
+  width: 26px;
+  border-left: 1px solid {BORDER};
+}}
+
+QPushButton {{
+  background: {SURFACE_ALT};
+  border: 1px solid {BORDER};
+  border-radius: 12px;
+  padding: 10px 14px;
+}}
+
+QPushButton:hover {{border-color: {PRIMARY_MID};}}
+QPushButton:disabled {{color: {TEXT_DISABLED};}}
+
+QPushButton[variant="primary"] {{
+  background: qlineargradient(x1:0,y1:1,x2:1,y2:0, stop:0 {PRIMARY_START}, stop:0.5 {PRIMARY_MID}, stop:1 {PRIMARY_END});
+  border: 0px;
+  color: #0E111A;
+  font-weight: 600;
+}}
+
+QPushButton[variant="primary"]:hover {{
+  background: qlineargradient(x1:0,y1:1,x2:1,y2:0, stop:0 #3DE4FF, stop:0.5 #77BBFF, stop:1 #8C72FF);
+}}
+
+QPushButton[variant="ghost"] {{
+  background: transparent;
+  border: 1px dashed {BORDER};
+  color: {TEXT_MUTED};
+}}
+
+QCheckBox::indicator {{
+  width: 18px; height: 18px;
+  border: 1px solid {BORDER};
+  border-radius: 6px;
+  background: {SURFACE_ALT};
+}}
+QCheckBox::indicator:checked {{
+  background: qlineargradient(x1:0,y1:1,x2:1,y2:0, stop:0 {PRIMARY_START}, stop:1 {PRIMARY_END});
+  border: 0px;
+}}
+
+QProgressBar {{
+  background: {SURFACE_ALT};
+  border: 1px solid {BORDER};
+  border-radius: 10px;
+  text-align: center;
+}}
+QProgressBar::chunk {{
+  border-radius: 10px;
+  background: qlineargradient(x1:0,y1:1,x2:1,y2:0, stop:0 {PRIMARY_START}, stop:0.5 {PRIMARY_MID}, stop:1 {PRIMARY_END});
+}}
+
+QScrollBar:vertical {{
+  width: 10px; background: {SURFACE}; margin: 10px 0 10px 0; border-radius: 8px;
+}}
+QScrollBar::handle:vertical {{
+  background: {BORDER}; border-radius: 8px; min-height: 24px;
+}}
+QScrollBar::handle:vertical:hover {{background: {PRIMARY_MID};}}
+QScrollBar::add-line, QScrollBar::sub-line {{height: 0;}}
+
+QToolTip {{
+  background: {SURFACE};
+  color: {TEXT};
+  border: 1px solid {BORDER};
+  border-radius: 10px;
+  padding: 6px 8px;
+}}
