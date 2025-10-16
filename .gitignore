@@ -46,6 +46,7 @@ config.json
 .sora2gui/
 .sorastudio/
 SoraStudio.spec
+tests/
 
 # Logs
 *.log

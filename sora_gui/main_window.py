@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
     QComboBox, QLineEdit, QTextEdit, QPushButton, QLabel, QFileDialog,
     QProgressBar, QPlainTextEdit, QMessageBox, QSplitter, QCheckBox, QSpinBox, QFrame, QSizePolicy, QScrollArea
 )
-from PySide6.QtCore import Qt, QSize, QThread, QUrl, QTimer, QPoint, QRect
+from PySide6.QtCore import Qt, QTimer, QThread, QSize, QUrl, QMetaObject, Q_ARG, QPoint, QRect
 from PySide6.QtGui import QDesktopServices, QGuiApplication
 from shiboken6 import isValid
 
@@ -26,8 +26,11 @@ from sora_gui.preview import CompactPreviewRow
 from .dialogs import JsonDialog
 from .worker import Worker
 from .assets import icon
-from sora_core.models import Project, Settings
-from .config import get_settings, save_settings, get_last_state, save_last_state, get_recent_projects, add_recent_project
+from sora_core.models import Project, Settings, Shot
+from sora_core.queue import QueueManager
+from .config import get_settings, save_settings, get_last_state, save_last_state, get_recent_projects, add_recent_project, CONFIG_DIR, get_window_geometry, save_window_geometry
+from .queue_panel import QueuePanel
+import uuid
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +48,9 @@ class SoraApp(QMainWindow):
         self.current_project_path: Optional[Path] = None
         self.autosave_timer: Optional[QTimer] = None
         self.project_modified: bool = False
+        self.queue_manager: Optional[QueueManager] = None
+        self.queue_panel: Optional[QueuePanel] = None
+        self.queue_running: bool = False
         
         ensure_dirs()
         self._setup_ui()
@@ -52,19 +58,72 @@ class SoraApp(QMainWindow):
         self._connect_signals()
         self._load_initial_state()
         self._setup_autosave()
+        self._restore_geometry()
+    
+    def _restore_geometry(self) -> None:
+        """Restore window geometry"""
+        geometry = get_window_geometry()
+        if geometry:
+            if "window_geometry" in geometry:
+                try:
+                    self.restoreGeometry(bytes.fromhex(geometry["window_geometry"]))
+                except Exception as e:
+                    logger.warning(f"Failed to restore window geometry: {e}")
+            if "splitter_state" in geometry:
+                try:
+                    self.centralWidget().restoreState(bytes.fromhex(geometry["splitter_state"]))
+                except Exception as e:
+                    logger.warning(f"Failed to restore splitter state: {e}")
+            if "left_splitter_sizes" in geometry and geometry["left_splitter_sizes"]:
+                try:
+                    QTimer.singleShot(100, lambda: self._restore_left_splitter(geometry["left_splitter_sizes"]))
+                except Exception as e:
+                    logger.warning(f"Failed to restore left splitter: {e}")
+    
+    def _restore_left_splitter(self, sizes) -> None:
+        """Restore left splitter sizes"""
+        if hasattr(self, 'top_panel') and hasattr(self, 'bottom_panel'):
+            parent = self.top_panel.parent()
+            if isinstance(parent, QSplitter):
+                parent.setSizes(sizes)
+                logger.info(f"Restored left splitter sizes: {sizes}")
     
     def _setup_ui(self) -> None:
         """Setup the user interface"""
-        self.splitter = QSplitter(Qt.Orientation.Vertical)
+        self.queue_manager = QueueManager(
+            parallel_jobs=1,
+            state_file=CONFIG_DIR / "queue_state.json",
+            worker_factory=self._process_queue_shot
+        )
+        
+        main_splitter = QSplitter(Qt.Orientation.Horizontal)
+        
+        left_splitter = QSplitter(Qt.Orientation.Vertical)
         self.top_panel = self._create_top_panel()
         self.bottom_panel = self._create_bottom_panel()
-        self.splitter.addWidget(self.top_panel)
-        self.splitter.addWidget(self.bottom_panel)
-        self.splitter.setStretchFactor(0, 3)
-        self.splitter.setStretchFactor(1, 1)
-        self.splitter.setCollapsible(0, False)
-        self.splitter.setCollapsible(1, True)
-        self.setCentralWidget(self.splitter)
+        left_splitter.addWidget(self.top_panel)
+        left_splitter.addWidget(self.bottom_panel)
+        left_splitter.setStretchFactor(0, 3)
+        left_splitter.setStretchFactor(1, 1)
+        left_splitter.setCollapsible(0, False)
+        left_splitter.setCollapsible(1, True)
+        
+        self.queue_panel = self._create_queue_panel()
+        
+        main_splitter.addWidget(left_splitter)
+        main_splitter.addWidget(self.queue_panel)
+        main_splitter.setStretchFactor(0, 3)
+        main_splitter.setStretchFactor(1, 1)
+        main_splitter.setCollapsible(0, False)
+        main_splitter.setCollapsible(1, False)
+        
+        self.setCentralWidget(main_splitter)
+    
+    def _create_queue_panel(self) -> QWidget:
+        """Create queue panel"""
+        panel = QueuePanel(self)
+        panel.set_queue_manager(self.queue_manager)
+        return panel
     
     def _setup_menu(self) -> None:
         """Setup menu bar"""
@@ -275,7 +334,9 @@ class SoraApp(QMainWindow):
     
     def _create_button_row(self) -> QHBoxLayout:
         """Create main action button row"""
-        self.send_btn = QPushButton(icon("play.svg"), "Generate")
+        self.queue_btn = QPushButton("➕ Add to Queue")
+        
+        self.send_btn = QPushButton(icon("play.svg"), "Generate Now")
         self.send_btn.setProperty("variant", "primary")
         self.open_last_btn = QPushButton(icon("open.svg"), "Open Last File")
         self.open_last_btn.setEnabled(False)
@@ -285,6 +346,7 @@ class SoraApp(QMainWindow):
         
         btn_row = QHBoxLayout()
         btn_row.setSpacing(8)
+        btn_row.addWidget(self.queue_btn)
         btn_row.addWidget(self.send_btn)
         btn_row.addWidget(self.open_last_btn)
         btn_row.addWidget(self.show_resp_btn)
@@ -318,7 +380,8 @@ class SoraApp(QMainWindow):
         self.output_dir_btn.clicked.connect(self.browse_output)
         self.save_key_btn.clicked.connect(self.save_key)
         self.test_key_btn.clicked.connect(self.test_key)
-        self.send_btn.clicked.connect(self.generate)
+        self.queue_btn.clicked.connect(self.add_to_queue)
+        self.send_btn.clicked.connect(self.generate_or_stop)
         self.show_resp_btn.clicked.connect(self.show_last_response)
         self.open_last_btn.clicked.connect(self.open_last_file)
         self.resume_btn.clicked.connect(self.resume_job)
@@ -630,8 +693,19 @@ class SoraApp(QMainWindow):
         self.worker.jobid.connect(self.on_jobid)
         self.thread.start()
 
+    def generate_or_stop(self) -> None:
+        """Generate videos or stop queue based on current state"""
+        if self.queue_running:
+            self.queue_manager.stop()
+            self.queue_running = False
+            self.send_btn.setText("⚡ Generate Now")
+            self.log.appendPlainText("Queue stopped")
+            return
+        
+        self.generate()
+    
     def generate(self) -> None:
-        """Start video generation"""
+        """Start video generation - processes queue if items exist, otherwise uses current prompt"""
         k = self.api_key_edit.text().strip()
         if not k:
             QMessageBox.warning(self, "Missing API Key", "Please enter and save your API key first.")
@@ -643,6 +717,17 @@ class SoraApp(QMainWindow):
                 "Invalid API Key", 
                 "API key format appears incorrect. It should start with 'sk-'."
             )
+            return
+        
+        status = self.queue_manager.get_queue_status()
+        total_queued = len(status['queued']) + len(status['active'])
+        
+        if total_queued > 0:
+            self.log.appendPlainText(f"Starting queue with {total_queued} items...")
+            self.send_btn.setText("⏹ Stop Queue")
+            self.queue_running = True
+            if not self.queue_manager._running:
+                self.queue_manager.start()
             return
         
         prompt = self.prompt_edit.toPlainText().strip()
@@ -714,7 +799,36 @@ class SoraApp(QMainWindow):
             QMessageBox.warning(self, "Missing Job ID", "Please enter a job ID to resume.")
             return
         
-        self.start_worker(job_id=jid)
+        msg_box = QMessageBox(self)
+        msg_box.setWindowTitle("Resume Job")
+        msg_box.setText(f"How would you like to resume job {jid}?")
+        msg_box.setIcon(QMessageBox.Icon.Question)
+        
+        resume_now_btn = msg_box.addButton("Resume Now (Immediate)", QMessageBox.ButtonRole.YesRole)
+        add_queue_btn = msg_box.addButton("Add to Queue", QMessageBox.ButtonRole.NoRole)
+        cancel_btn = msg_box.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
+        
+        msg_box.exec()
+        clicked = msg_box.clickedButton()
+        
+        if clicked == cancel_btn:
+            return
+        elif clicked == add_queue_btn:
+            import uuid
+            shot = Shot(
+                id=str(uuid.uuid4()),
+                model=self.model_box.currentText(),
+                width=int(self.size_box.currentText().split("x")[0]),
+                height=int(self.size_box.currentText().split("x")[1]),
+                duration_s=int(self.seconds_box.currentText()),
+                prompt=self.prompt_edit.toPlainText().strip() or f"Resume job {jid}",
+                status="queued",
+                job_id=jid
+            )
+            self.queue_manager.enqueue(shot)
+            self.log.appendPlainText(f"Added job {jid} to queue")
+        else:
+            self.start_worker(job_id=jid)
 
     def capture_last_response(self, payload: dict) -> None:
         """Capture API response for debugging"""
@@ -766,6 +880,140 @@ class SoraApp(QMainWindow):
             return
         QGuiApplication.clipboard().setText(txt)
         self.log.appendPlainText(f"Copied job ID: {txt}")
+    
+    def add_to_queue(self) -> None:
+        """Add current parameters to queue"""
+        model = self.model_box.currentText()
+        size = self.size_box.currentText()
+        duration = int(self.seconds_box.currentText())
+        prompt = self.prompt_edit.toPlainText().strip()
+        
+        if not prompt:
+            QMessageBox.warning(self, "Missing Prompt", "Please enter a prompt.")
+            return
+        
+        w, h = map(int, size.split("x"))
+        
+        shot = Shot(
+            id=str(uuid.uuid4()),
+            model=model,
+            width=w,
+            height=h,
+            duration_s=duration,
+            prompt=prompt,
+            status="queued"
+        )
+        
+        self.queue_manager.enqueue(shot)
+        self.log.appendPlainText(f"Added to queue: {prompt[:50]}...")
+        
+        if self.current_project:
+            self.current_project.shots.append(shot)
+            self._mark_modified()
+    
+    def _process_queue_shot(self, shot: Shot) -> Tuple[bool, Optional[str]]:
+        """Process a shot from the queue - called by queue worker thread"""
+        try:
+            from sora_gui.worker import Worker
+            
+            k = self.api_key_edit.text().strip()
+            out_dir = Path(self.output_dir_edit.text().strip() or str(OUTPUT_DIR))
+            out_dir.mkdir(parents=True, exist_ok=True)
+            
+            size_str = f"{shot.width}x{shot.height}"
+            duration_str = str(shot.duration_s)
+            
+            QMetaObject.invokeMethod(
+                self.log, "appendPlainText",
+                Qt.ConnectionType.QueuedConnection,
+                Q_ARG(str, f"\n--- Processing: {shot.prompt[:60]} ---")
+            )
+            QMetaObject.invokeMethod(
+                self.progress, "setValue",
+                Qt.ConnectionType.QueuedConnection,
+                Q_ARG(int, 0)
+            )
+            
+            resume_job_id = getattr(shot, 'job_id', None)
+            
+            worker = Worker(
+                k, shot.model, size_str, duration_str, shot.prompt,
+                "", out_dir, resume_job_id,
+                self.poll_spin.value(),
+                self.maxwait_spin.value()
+            )
+            
+            result = {"success": False, "error": None}
+            
+            def on_progress(val):
+                QMetaObject.invokeMethod(
+                    self.progress, "setValue",
+                    Qt.ConnectionType.QueuedConnection,
+                    Q_ARG(int, val)
+                )
+            
+            def on_log(msg):
+                QMetaObject.invokeMethod(
+                    self.log, "appendPlainText",
+                    Qt.ConnectionType.QueuedConnection,
+                    Q_ARG(str, msg)
+                )
+            
+            def on_finished():
+                result["success"] = True
+            
+            def on_failed(msg):
+                result["error"] = str(msg)
+            
+            def on_saved(path):
+                if path:
+                    shot.output_path = str(path)
+                    logger.info(f"Set output_path for shot {shot.id}: {shot.output_path}")
+                QMetaObject.invokeMethod(
+                    self.log, "appendPlainText",
+                    Qt.ConnectionType.QueuedConnection,
+                    Q_ARG(str, f"Saved: {path}")
+                )
+            
+            def on_jobid(jid):
+                QMetaObject.invokeMethod(
+                    self.jobid_edit, "setText",
+                    Qt.ConnectionType.QueuedConnection,
+                    Q_ARG(str, jid)
+                )
+            
+            def on_lastresp(resp):
+                self.last_response = resp
+                QMetaObject.invokeMethod(
+                    self.show_resp_btn, "setEnabled",
+                    Qt.ConnectionType.QueuedConnection,
+                    Q_ARG(bool, True)
+                )
+            
+            worker.progressed.connect(on_progress)
+            worker.logged.connect(on_log)
+            worker.finished.connect(on_finished)
+            worker.failed.connect(on_failed)
+            worker.saved.connect(on_saved)
+            worker.jobid.connect(on_jobid)
+            worker.lastresp.connect(on_lastresp)
+            
+            worker.run()
+            
+            QMetaObject.invokeMethod(
+                self.progress, "setValue",
+                Qt.ConnectionType.QueuedConnection,
+                Q_ARG(int, 100)
+            )
+            
+            if result["success"]:
+                return (True, None)
+            else:
+                return (False, result.get("error", "Unknown error"))
+                
+        except Exception as e:
+            logger.error(f"Failed to process shot: {e}")
+            return (False, str(e))
     
     def new_project(self) -> None:
         """Create a new project"""
@@ -961,6 +1209,31 @@ class SoraApp(QMainWindow):
             "duration": self.seconds_box.currentText(),
             "prompt": self.prompt_edit.toPlainText()
         })
+        
+        try:
+            geom = self.saveGeometry()
+            main_state = self.centralWidget().saveState()
+            
+            left_splitter_sizes = []
+            if hasattr(self, 'top_panel') and hasattr(self, 'bottom_panel'):
+                parent = self.top_panel.parent()
+                if isinstance(parent, QSplitter):
+                    left_splitter_sizes = parent.sizes()
+            
+            save_window_geometry({
+                "window_geometry": geom.toHex().data().decode(),
+                "splitter_state": main_state.toHex().data().decode(),
+                "left_splitter_sizes": left_splitter_sizes
+            })
+            logger.info("Saved window geometry")
+        except Exception as e:
+            logger.error(f"Failed to save window geometry: {e}")
+        
+        if self.queue_manager:
+            try:
+                self.queue_manager.stop()
+            except:
+                pass
         
         if self.thread and self.thread.isRunning():
             if self.worker:

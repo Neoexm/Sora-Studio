@@ -94,6 +94,9 @@ class Worker(QObject):
                     if chunk:
                         f.write(chunk)
             
+            if out_path.exists():
+                logger.info(f"Removing existing file: {out_path}")
+                out_path.unlink()
             temp_path.rename(out_path)
             return out_path
         except Exception as e:
@@ -115,6 +118,9 @@ class Worker(QObject):
                 self.job_id = self._submit_job(headers)
                 if not self.job_id or self._cancelled:
                     return
+            else:
+                self.logged.emit(f"🔄 Resuming job: {self.job_id}")
+                self.jobid.emit(self.job_id)
             
             self._poll_until_complete(headers)
         except requests.exceptions.Timeout:

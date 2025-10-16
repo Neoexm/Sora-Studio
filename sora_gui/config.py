@@ -133,3 +133,14 @@ def save_last_state(state: Dict[str, Any]) -> None:
     cfg = load_config()
     cfg["last_state"] = state
     save_config(cfg)
+
+def get_window_geometry() -> Dict[str, Any]:
+    """Get window geometry"""
+    cfg = load_config()
+    return cfg.get("window_geometry", {})
+
+def save_window_geometry(geometry: Dict[str, Any]) -> None:
+    """Save window geometry"""
+    cfg = load_config()
+    cfg["window_geometry"] = geometry
+    save_config(cfg)
