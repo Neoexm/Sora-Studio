@@ -2,8 +2,9 @@
 
 on:
   push:
-    branches: [ main ]
-  pull_request:
+    branches: [ main             convert icon.ico[0] -resize 256x256 AppDir/SoraStudio.png
+            cp AppDir/SoraStudio.png AppDir/usr/share/icons/hicolor/256x256/apps/
+            cp AppDir/SoraStudio.desktop AppDir/usr/share/applications/  pull_request:
     branches: [ main ]
 
 permissions:
