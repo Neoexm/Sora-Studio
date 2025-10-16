@@ -42,7 +42,7 @@ jobs:
             package_cmd: |
               sudo apt-get update
               sudo apt-get install -y libfuse2
-              wget -c https://github.com/probonopd/go-appimage/releases/download/continuous/appimagetool-x86_64.AppImage
+              wget -c https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage
               chmod +x appimagetool-x86_64.AppImage
               mkdir -p AppDir/usr/bin
               cp dist/SoraStudio AppDir/usr/bin/
@@ -57,7 +57,7 @@ jobs:
               EOF
               mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
               touch AppDir/usr/share/icons/hicolor/256x256/apps/SoraStudio.png
-              ARCH=x86_64 ./appimagetool-x86_64.AppImage AppDir dist/SoraStudio.AppImage
+              ARCH=x86_64 ./appimagetool-x86_64.AppImage --appimage-extract-and-run AppDir dist/SoraStudio.AppImage
 
     steps:
       - uses: actions/checkout@v4
