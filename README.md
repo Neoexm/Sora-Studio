@@ -1,7 +1,7 @@
 # Sora Studio
 
 <p align="center">
-  <img alt="Sora Studio" src="./icon.ico" width="180" height="180">
+  <img alt="Sora Studio" src="./logo.svg" width="180" height="180">
 </p>
 
 <p align="center">
