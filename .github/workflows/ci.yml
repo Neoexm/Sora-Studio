@@ -18,18 +18,39 @@ jobs:
           - os: windows-latest
             name: Windows
             artifact: SoraStudio.exe
+            output_name: SoraStudio-Windows.exe
             build_cmd: |
               pyinstaller main.py --name SoraStudio --onefile --windowed --clean --collect-all PySide6 --collect-all keyring --collect-all platformdirs --collect-all sora_gui --icon icon.ico
+            package_cmd: ""
           - os: macos-latest
             name: macOS
-            artifact: SoraStudio
+            artifact: SoraStudio.dmg
+            output_name: SoraStudio-macOS.dmg
             build_cmd: |
               pyinstaller main.py --name SoraStudio --onefile --windowed --clean --collect-all PySide6 --collect-all keyring --collect-all platformdirs --collect-all sora_gui
+            package_cmd: |
+              brew install create-dmg
+              create-dmg --volname "Sora Studio" --window-pos 200 120 --window-size 600 300 --icon-size 100 --app-drop-link 425 120 dist/SoraStudio.dmg dist/SoraStudio.app
           - os: ubuntu-latest
             name: Linux
-            artifact: SoraStudio
+            artifact: SoraStudio.AppImage
+            output_name: SoraStudio-Linux.AppImage
             build_cmd: |
               pyinstaller main.py --name SoraStudio --onefile --windowed --clean --collect-all PySide6 --collect-all keyring --collect-all platformdirs --collect-all sora_gui
+            package_cmd: |
+              wget -c https://github.com/$(wget -q https://github.com/probonopd/go-appimage/releases -O - | grep "appimagetool-.*-x86_64.AppImage" | head -n 1 | cut -d '"' -f 2)
+              chmod +x appimagetool-*.AppImage
+              mkdir -p AppDir/usr/bin
+              cp dist/SoraStudio AppDir/usr/bin/
+              cat > AppDir/SoraStudio.desktop << EOF
+              [Desktop Entry]
+              Name=Sora Studio
+              Exec=SoraStudio
+              Icon=SoraStudio
+              Type=Application
+              Categories=Graphics;
+              EOF
+              ./appimagetool-*.AppImage AppDir dist/SoraStudio.AppImage
 
     steps:
       - uses: actions/checkout@v4
@@ -46,6 +67,10 @@ jobs:
 
       - name: Build ${{ matrix.name }}
         run: ${{ matrix.build_cmd }}
+
+      - name: Package ${{ matrix.name }}
+        if: matrix.package_cmd != ''
+        run: ${{ matrix.package_cmd }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
