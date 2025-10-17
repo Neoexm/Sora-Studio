@@ -9,25 +9,25 @@
 - [x] Autosave mechanism
 - [x] State restore (remember last prompt/model/size on startup)
 
-## Phase 2: Queue System
-- [ ] Create `sora_core/queue.py` with QueueManager
-- [ ] Queue panel UI (table/list with status)
-- [ ] Batch shots with per-shot params
-- [ ] Parallel job limit configuration
-- [ ] Reorder queue items
-- [ ] Cancel individual jobs
-- [ ] Persist queue state for resume across restarts
-- [ ] Profile-aware rate limiting
+## Phase 2: Queue System ✅
+- [x] Create `sora_core/queue.py` with QueueManager
+- [x] Queue panel UI (table/list with status)
+- [x] Batch shots with per-shot params
+- [x] Parallel job limit configuration
+- [x] Reorder queue items
+- [x] Cancel individual jobs
+- [x] Persist queue state for resume across restarts
+- [x] Profile-aware rate limiting
 
-## Phase 3: Templates & Prompt Management
-- [ ] Template data model
-- [ ] Templates panel UI
-- [ ] Create/edit/delete templates
-- [ ] Search and filter templates
-- [ ] Tags system
-- [ ] Pin/star favorites
-- [ ] Prompt history
-- [ ] Apply template to current shot
+## Phase 3: Templates & Prompt Management ✅
+- [x] Template data model
+- [x] Templates panel UI
+- [x] Create/edit/delete templates
+- [x] Search and filter templates
+- [x] Tags system
+- [x] Pin/star favorites
+- [x] Prompt history
+- [x] Apply template to current shot
 
 ## Phase 4: CSV & Variable Expansion
 - [ ] `{placeholder}` syntax in prompts
@@ -230,14 +230,17 @@
 - [ ] Warning dialog on low space
 - [ ] Estimate video size
 
-## Phase 29: Cross-Platform Packaging
-- [ ] Windows .exe (PyInstaller)
-- [ ] macOS .app/.dmg (py2app)
-- [ ] Linux AppImage
-- [ ] Portable mode toggle
-- [ ] CI/CD workflow (GitHub Actions)
-- [ ] Multi-OS build artifacts
-- [ ] Release upload automation
+## Phase 29: Cross-Platform Packaging ✅
+- [x] Windows .exe (PyInstaller)
+- [x] macOS .app/.dmg (py2app + create-dmg)
+- [x] Linux AppImage
+- [x] Portable mode toggle
+- [x] CI/CD workflow (GitHub Actions)
+- [x] Multi-OS build artifacts
+- [ ] Release upload automation (manual artifact downloads for now)
+- [x] ImageMagick integration for icon conversion
+- [x] Proper .desktop file creation
+- [x] Icon placement for AppImage
 
 ## Phase 30: Code Quality & Testing
 - [ ] Configure ruff + black in pyproject.toml
@@ -268,6 +271,25 @@
 - Layout validation
 - Basic error handling
 - API key management
+- **COMPLETE cross-platform packaging with CI/CD automation**
+- **GitHub Actions workflow building Windows, macOS, and Linux binaries**
+- **Automatic artifact uploads for all three platforms**
+
+## Recently Completed
+- Phase 1: Complete data persistence layer with project files
+- Phase 2: Full queue system with parallel job management
+- Phase 3: Templates & Prompt Management system
+  - Template CRUD operations with full parameter support
+  - Search and filter by name, prompt, tags
+  - Pin/star favorite templates
+  - Prompt history tracking (last 20 prompts)
+  - Quick apply template to current shot
+- Phase 29: Cross-platform packaging infrastructure
+  - Windows executable with PyInstaller
+  - macOS DMG with custom volume and app bundle
+  - Linux AppImage with proper desktop integration
+  - GitHub Actions CI/CD pipeline
+  - Automated builds on push to main branch
 
 ## Priority
 Start with Phase 1 (persistence layer) since most other features depend on it. Phase 6 (dynamic capabilities) would be good to tackle early too - removes hardcoded stuff and makes everything more flexible. Queue system (Phase 2) and templates (Phase 3) are high-value features that should come after the foundation is solid.

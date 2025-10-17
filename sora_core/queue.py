@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from typing import Optional, Callable
 from threading import Thread, Lock, Event, Semaphore
-from queue import PriorityQueue
+from queue import PriorityQueue, Empty
 import time
 import json
 import logging
@@ -55,7 +55,7 @@ class QueueManager:
                 for _ in range(diff):
                     try:
                         self._semaphore.release()
-                    except:
+                    except ValueError:
                         pass
             self._save_state()
     
@@ -167,7 +167,7 @@ class QueueManager:
             
             try:
                 item = self._queue.get(timeout=0.5)
-            except:
+            except Empty:
                 continue
             
             if not item:

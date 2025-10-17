@@ -66,6 +66,7 @@ class Worker(QObject):
         fn = f"{self.job_id}_{body.get('model', self.model)}_{body.get('size', self.size)}_{body.get('seconds', self.seconds)}s.mp4"
         out_path = self.out_dir / fn
         temp_path = out_path.with_suffix('.tmp')
+        dr = None
         
         try:
             self.logged.emit("Downloading video...")
@@ -101,13 +102,20 @@ class Worker(QObject):
             return out_path
         except Exception as e:
             logger.error(f"Download failed: {e}")
+            self.failed.emit(f"Download error: {str(e)}")
+            return None
+        finally:
+            if dr is not None:
+                try:
+                    dr.close()
+                except Exception:
+                    pass
             if temp_path.exists():
                 try:
                     temp_path.unlink()
+                    logger.info(f"Cleaned up temp file: {temp_path}")
                 except Exception as cleanup_error:
                     logger.warning(f"Failed to cleanup temp file: {cleanup_error}")
-            self.failed.emit(f"Download error: {str(e)}")
-            return None
 
     def run(self) -> None:
         """Main worker loop"""
@@ -253,17 +261,10 @@ class Worker(QObject):
                     self.finished.emit()
                 return
             
-            # Workaround: Sometimes API gets stuck at 99% but video is actually ready
-            # This attempts to download the video periodically when stuck
             if prog >= 99:
                 stuck_99 += 1
-                if stuck_99 % STUCK_CHECK_INTERVAL == 0:
-                    logger.info(f"Stuck at 99%, attempting download (attempt {stuck_99 // STUCK_CHECK_INTERVAL})")
-                    out_path = self._download_video(headers, body)
-                    if out_path:
-                        self.saved.emit(str(out_path))
-                        self.finished.emit()
-                        return
+                if stuck_99 > 60:
+                    logger.warning(f"Job stuck at 99% for {stuck_99} polls. This may indicate an API issue.")
             else:
                 stuck_99 = 0
             

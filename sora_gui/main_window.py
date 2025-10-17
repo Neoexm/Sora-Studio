@@ -8,7 +8,8 @@ import requests
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QFormLayout, QHBoxLayout, QGridLayout,
     QComboBox, QLineEdit, QTextEdit, QPushButton, QLabel, QFileDialog,
-    QProgressBar, QPlainTextEdit, QMessageBox, QSplitter, QCheckBox, QSpinBox, QFrame, QSizePolicy, QScrollArea
+    QProgressBar, QPlainTextEdit, QMessageBox, QSplitter, QCheckBox, QSpinBox, QFrame, QSizePolicy, QScrollArea,
+    QTabWidget, QMenu
 )
 from PySide6.QtCore import Qt, QTimer, QThread, QSize, QUrl, QMetaObject, Q_ARG, QPoint, QRect
 from PySide6.QtGui import QDesktopServices, QGuiApplication
@@ -20,16 +21,17 @@ except ImportError:
     Image = None
 
 from .constants import API_BASE, SUPPORTED_SIZES, SUPPORTED_SECONDS, TIMEOUT_TEST, TIMEOUT_MODERATION
-from .config import OUTPUT_DIR, get_saved_key, set_saved_key, ensure_dirs
+from .config import OUTPUT_DIR, get_saved_key, set_saved_key, ensure_dirs, load_config, save_config
 from .utils import safe_json, pretty, aspect_of, check_disk_space, validate_api_key
 from sora_gui.preview import CompactPreviewRow
 from .dialogs import JsonDialog
 from .worker import Worker
 from .assets import icon
-from sora_core.models import Project, Settings, Shot
+from sora_core.models import Project, Settings, Shot, Template
 from sora_core.queue import QueueManager
 from .config import get_settings, save_settings, get_last_state, save_last_state, get_recent_projects, add_recent_project, CONFIG_DIR, get_window_geometry, save_window_geometry
 from .queue_panel import QueuePanel
+from .template_panel import TemplatePanel
 import uuid
 
 logger = logging.getLogger(__name__)
@@ -50,7 +52,9 @@ class SoraApp(QMainWindow):
         self.project_modified: bool = False
         self.queue_manager: Optional[QueueManager] = None
         self.queue_panel: Optional[QueuePanel] = None
+        self.template_panel: Optional[TemplatePanel] = None
         self.queue_running: bool = False
+        self.prompt_history: list[str] = []
         
         ensure_dirs()
         self._setup_ui()
@@ -59,6 +63,14 @@ class SoraApp(QMainWindow):
         self._load_initial_state()
         self._setup_autosave()
         self._restore_geometry()
+        
+        if not self.current_project:
+            self.current_project = Project(
+                name="Untitled Project",
+                output_dir=str(OUTPUT_DIR),
+                settings=Settings(**get_settings())
+            )
+            self._update_window_title()
     
     def _restore_geometry(self) -> None:
         """Restore window geometry"""
@@ -108,10 +120,10 @@ class SoraApp(QMainWindow):
         left_splitter.setCollapsible(0, False)
         left_splitter.setCollapsible(1, True)
         
-        self.queue_panel = self._create_queue_panel()
+        right_tabs = self._create_right_tabs()
         
         main_splitter.addWidget(left_splitter)
-        main_splitter.addWidget(self.queue_panel)
+        main_splitter.addWidget(right_tabs)
         main_splitter.setStretchFactor(0, 3)
         main_splitter.setStretchFactor(1, 1)
         main_splitter.setCollapsible(0, False)
@@ -119,11 +131,41 @@ class SoraApp(QMainWindow):
         
         self.setCentralWidget(main_splitter)
     
-    def _create_queue_panel(self) -> QWidget:
-        """Create queue panel"""
-        panel = QueuePanel(self)
-        panel.set_queue_manager(self.queue_manager)
-        return panel
+    def _create_right_tabs(self) -> QTabWidget:
+        tabs = QTabWidget()
+        
+        self.queue_panel = QueuePanel(self)
+        self.queue_panel.set_queue_manager(self.queue_manager)
+        tabs.addTab(self.queue_panel, "Queue")
+        
+        self.template_panel = TemplatePanel(self)
+        self.template_panel.main_window = self
+        self.template_panel.template_applied.connect(self._on_template_prompt_applied)
+        tabs.addTab(self.template_panel, "Templates")
+        
+        return tabs
+    
+    def _on_template_prompt_applied(self, prompt: str):
+        self.prompt_edit.setPlainText(prompt)
+        self._mark_modified()
+    
+    def apply_template(self, template: Template):
+        idx = self.model_box.findText(template.model)
+        if idx >= 0:
+            self.model_box.setCurrentIndex(idx)
+        
+        size_str = f"{template.width}x{template.height}"
+        idx = self.size_box.findText(size_str)
+        if idx >= 0:
+            self.size_box.setCurrentIndex(idx)
+        
+        idx = self.seconds_box.findText(str(template.duration_s))
+        if idx >= 0:
+            self.seconds_box.setCurrentIndex(idx)
+        
+        self.prompt_edit.setPlainText(template.prompt)
+        self._mark_modified()
+        self.log.appendPlainText(f"Applied template: {template.name}")
     
     def _setup_menu(self) -> None:
         """Setup menu bar"""
@@ -224,6 +266,16 @@ class SoraApp(QMainWindow):
         prompt_label = QLabel("Prompt")
         prompt_label.setProperty("heading", True)
         root.addWidget(prompt_label)
+        
+        prompt_header = QHBoxLayout()
+        prompt_header.setSpacing(8)
+        
+        self.history_btn = QPushButton("Recent ▼")
+        self.history_btn.clicked.connect(self._show_history_menu)
+        prompt_header.addStretch()
+        prompt_header.addWidget(self.history_btn)
+        
+        root.addLayout(prompt_header)
         
         self.prompt_edit = QTextEdit()
         self.prompt_edit.setPlaceholderText("Insert your prompt here...")
@@ -387,10 +439,58 @@ class SoraApp(QMainWindow):
         self.resume_btn.clicked.connect(self.resume_job)
         self.copy_job_btn.clicked.connect(self.copy_job_id)
     
+    def _show_history_menu(self):
+        menu = QMenu(self)
+        
+        if not self.prompt_history:
+            action = menu.addAction("No recent prompts")
+            action.setEnabled(False)
+        else:
+            for prompt in self.prompt_history[:10]:
+                preview = prompt[:60] + "..." if len(prompt) > 60 else prompt
+                action = menu.addAction(preview)
+                action.triggered.connect(lambda checked, p=prompt: self._apply_history_prompt(p))
+            
+            if len(self.prompt_history) > 0:
+                menu.addSeparator()
+                clear_action = menu.addAction("Clear History")
+                clear_action.triggered.connect(self._clear_history)
+        
+        menu.exec(self.history_btn.mapToGlobal(self.history_btn.rect().bottomLeft()))
+    
+    def _apply_history_prompt(self, prompt: str):
+        self.prompt_edit.setPlainText(prompt)
+        self._mark_modified()
+    
+    def _clear_history(self):
+        self.prompt_history.clear()
+        self._save_prompt_history()
+    
+    def _add_to_history(self, prompt: str):
+        if not prompt or not prompt.strip():
+            return
+        
+        if prompt in self.prompt_history:
+            self.prompt_history.remove(prompt)
+        
+        self.prompt_history.insert(0, prompt)
+        self.prompt_history = self.prompt_history[:20]
+        self._save_prompt_history()
+    
+    def _save_prompt_history(self):
+        cfg = load_config()
+        cfg["prompt_history"] = self.prompt_history
+        save_config(cfg)
+    
+    def _load_prompt_history(self):
+        cfg = load_config()
+        self.prompt_history = cfg.get("prompt_history", [])
+    
     def _load_initial_state(self) -> None:
-        """Load initial application state"""
         self.api_key_edit.setText(get_saved_key())
         self.refresh_sizes()
+        
+        self._load_prompt_history()
         
         last_state = get_last_state()
         if last_state:
@@ -438,7 +538,7 @@ class SoraApp(QMainWindow):
                 geom.translate(parent_geom.x(), parent_geom.y())
                 parent = parent.parent()
             return geom
-        except:
+        except Exception:
             return QRect()
     
     def _layout_self_check_now(self):
@@ -492,12 +592,10 @@ class SoraApp(QMainWindow):
             self.preview_row.set_dimensions(w, h)
     
     def _parse_size(self, text: str) -> tuple:
-        """Parse size string like '1280x720' into (w, h)"""
+        """Parse size string like '1280x720' into (w, h) using utils.aspect_of with safe fallback"""
         try:
-            parts = text.lower().split("x")
-            w, h = int(parts[0]), int(parts[1])
-            return w, h
-        except:
+            return aspect_of(text)
+        except ValueError:
             return 1280, 720
 
     def refresh_sizes(self) -> None:
@@ -777,6 +875,8 @@ class SoraApp(QMainWindow):
                 )
                 return
         
+        self._add_to_history(prompt)
+        
         self.start_worker(job_id=None)
 
     def resume_job(self) -> None:
@@ -906,6 +1006,8 @@ class SoraApp(QMainWindow):
         
         self.queue_manager.enqueue(shot)
         self.log.appendPlainText(f"Added to queue: {prompt[:50]}...")
+        
+        self._add_to_history(prompt)
         
         if self.current_project:
             self.current_project.shots.append(shot)
@@ -1037,6 +1139,10 @@ class SoraApp(QMainWindow):
         )
         self.current_project_path = None
         self.project_modified = False
+        
+        if self.template_panel:
+            self.template_panel._filter_templates()
+        
         self._update_window_title()
         self.log.appendPlainText("Created new project")
     
@@ -1136,7 +1242,6 @@ class SoraApp(QMainWindow):
                 logger.error(f"Autosave failed: {e}")
     
     def _capture_current_state(self) -> None:
-        """Capture current UI state to project"""
         if not self.current_project:
             return
         
@@ -1147,7 +1252,6 @@ class SoraApp(QMainWindow):
         self.current_project.output_dir = self.output_dir_edit.text()
     
     def _restore_project_state(self) -> None:
-        """Restore UI state from project"""
         if not self.current_project:
             return
         
@@ -1232,7 +1336,7 @@ class SoraApp(QMainWindow):
         if self.queue_manager:
             try:
                 self.queue_manager.stop()
-            except:
+            except Exception:
                 pass
         
         if self.thread and self.thread.isRunning():

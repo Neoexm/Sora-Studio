@@ -144,3 +144,14 @@ def save_window_geometry(geometry: Dict[str, Any]) -> None:
     cfg = load_config()
     cfg["window_geometry"] = geometry
     save_config(cfg)
+
+def get_templates() -> list:
+    """Get global templates from config"""
+    cfg = load_config()
+    return cfg.get("templates", [])
+
+def save_templates(templates: list) -> None:
+    """Save global templates to config"""
+    cfg = load_config()
+    cfg["templates"] = templates
+    save_config(cfg)

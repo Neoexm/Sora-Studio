@@ -3,6 +3,15 @@ from typing import Optional
 from datetime import datetime, timezone
 from pathlib import Path
 import json
+from enum import Enum
+
+class ShotStatus(str, Enum):
+    PENDING = "pending"
+    QUEUED = "queued"
+    PROCESSING = "processing"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
 
 @dataclass
 class Profile:
@@ -23,7 +32,7 @@ class Shot:
     duration_s: int
     prompt: str
     ref_images: list[str] = field(default_factory=list)
-    status: str = "pending"
+    status: str = field(default=ShotStatus.PENDING.value)
     job_id: Optional[str] = None
     output_path: Optional[str] = None
     meta: dict = field(default_factory=dict)
@@ -105,12 +114,28 @@ class Project:
         )
     
     def save(self, path: Path) -> None:
+        """Save project to file with atomic write."""
         path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(self.to_dict(), f, indent=2, ensure_ascii=False)
+        temp_path = path.with_suffix('.tmp')
+        try:
+            with open(temp_path, "w", encoding="utf-8") as f:
+                json.dump(self.to_dict(), f, indent=2, ensure_ascii=False)
+            if path.exists():
+                path.unlink()
+            temp_path.rename(path)
+        except Exception:
+            if temp_path.exists():
+                temp_path.unlink()
+            raise
     
     @classmethod
     def load(cls, path: Path) -> "Project":
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        return cls.from_dict(data)
+        """Load project from file."""
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return cls.from_dict(data)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Invalid project file format: {e}") from e
+        except Exception as e:
+            raise IOError(f"Failed to load project: {e}") from e
